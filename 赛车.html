@@ -1,0 +1,391 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>僵尸赛车小游戏</title>
+    <style>
+        body {
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+            background-color: #f0f0f0;
+            font-family: Arial, sans-serif;
+        }
+        #gameCanvas {
+            border: 2px solid #333;
+        }
+        #controls {
+            margin-top: 20px;
+            display: flex;
+            justify-content: space-between;
+            width: 400px;
+        }
+        button {
+            font-size: 18px;
+            padding: 10px 20px;
+            margin: 0 10px;
+            cursor: pointer;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            transition: background-color 0.3s;
+        }
+        button:hover {
+            background-color: #45a049;
+        }
+        #arrowControls {
+            display: flex;
+            justify-content: space-between;
+            width: 200px;
+            margin-top: 20px;
+        }
+        .arrow {
+            font-size: 24px;
+            padding: 10px 20px;
+            cursor: pointer;
+            background-color: #3498db;
+            color: white;
+            border: none;
+            border-radius: 5px;
+        }
+        #instructions {
+            margin-top: 20px;
+            text-align: center;
+            max-width: 400px;
+        }
+    </style>
+</head>
+<body>
+    <h1>僵尸赛车小游戏</h1>
+    <canvas id="gameCanvas" width="400" height="600"></canvas>
+    <div id="arrowControls">
+        <button class="arrow" id="leftArrow">←</button>
+        <button class="arrow" id="rightArrow">→</button>
+    </div>
+    <div id="controls">
+        <button id="startButton">开始游戏</button>
+        <button id="restartButton" style="display: none;">重新开始</button>
+        <button id="nextLevelButton" style="display: none;">进入下一关</button>
+    </div>
+    <div id="instructions">
+        <p>使用左右箭头键或点击屏幕上的箭头来控制赛车左右移动</p>
+        <p>避开僵尸，尽可能行驶更远的距离！</p>
+        <p>在第一关行驶2000米后，将进入更具挑战性的第二关</p>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const startButton = document.getElementById('startButton');
+        const restartButton = document.getElementById('restartButton');
+        const nextLevelButton = document.getElementById('nextLevelButton');
+        const leftArrow = document.getElementById('leftArrow');
+        const rightArrow = document.getElementById('rightArrow');
+
+        let gameState = 'menu';
+        let level = 1;
+        let car, obstacles, distance, carSpeed, obstacleFrequency;
+        let roadOffset = 0;
+        let lastTime = 0;
+        let audioContext;
+        let backgroundMusic;
+
+        // 赛车图像
+        const carImg = new Image();
+        carImg.src = 'data:image/svg+xml,' + encodeURIComponent(`
+            <svg xmlns="http://www.w3.org/2000/svg" width="50" height="80" viewBox="0 0 50 80">
+                <rect x="5" y="10" width="40" height="60" fill="red" />
+                <rect x="0" y="20" width="50" height="40" fill="red" rx="10" />
+                <rect x="10" y="5" width="30" height="15" fill="lightblue" />
+                <circle cx="10" cy="70" r="8" fill="black" />
+                <circle cx="40" cy="70" r="8" fill="black" />
+            </svg>
+        `);
+
+        // 僵尸图像
+        const zombieImg = new Image();
+        zombieImg.src = 'data:image/svg+xml,' + encodeURIComponent(`
+            <svg xmlns="http://www.w3.org/2000/svg" width="50" height="50" viewBox="0 0 50 50">
+                <circle cx="25" cy="25" r="20" fill="green" />
+                <circle cx="18" cy="20" r="4" fill="red" />
+                <circle cx="32" cy="20" r="4" fill="red" />
+                <path d="M 15 35 Q 25 25 35 35" stroke="black" fill="none" stroke-width="2" />
+            </svg>
+        `);
+
+        function initGame() {
+            car = {
+                x: canvas.width / 2 - 25,
+                y: canvas.height - 100,
+                width: 50,
+                height: 80
+            };
+
+            obstacles = [];
+            distance = 0;
+
+            if (level === 1) {
+                carSpeed = 150; // 速度现在表示每秒移动的像素数
+                obstacleFrequency = 1; // 每秒生成的障碍物数量
+            } else {
+                carSpeed = 200;
+                obstacleFrequency = 1.5;
+            }
+
+            startBackgroundMusic();
+        }
+
+        function drawRoad() {
+            ctx.fillStyle = '#333';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            ctx.strokeStyle = 'white';
+            ctx.setLineDash([20, 20]);
+            for (let i = 0; i < canvas.width; i += 100) {
+                ctx.beginPath();
+                ctx.moveTo(i, (roadOffset % 40) - 40);
+                ctx.lineTo(i, canvas.height);
+                ctx.stroke();
+            }
+        }
+
+        function drawCar() {
+            ctx.drawImage(carImg, car.x, car.y, car.width, car.height);
+        }
+
+        function drawObstacles() {
+            obstacles.forEach(obstacle => {
+                ctx.drawImage(zombieImg, obstacle.x, obstacle.y, obstacle.width, obstacle.height);
+            });
+        }
+
+        function createObstacle(deltaTime) {
+            if (Math.random() < obstacleFrequency * deltaTime) {
+                const obstacle = {
+                    x: Math.random() * (canvas.width - 50),
+                    y: -50,
+                    width: 50,
+                    height: 50
+                };
+                obstacles.push(obstacle);
+            }
+        }
+
+        function moveObstacles(deltaTime) {
+            obstacles.forEach(obstacle => {
+                obstacle.y += carSpeed * deltaTime;
+            });
+
+            obstacles = obstacles.filter(obstacle => obstacle.y < canvas.height);
+        }
+
+        function checkCollision() {
+            return obstacles.some(obstacle =>
+                car.x < obstacle.x + obstacle.width &&
+                car.x + car.width > obstacle.x &&
+                car.y < obstacle.y + obstacle.height &&
+                car.y + car.height > obstacle.y
+            );
+        }
+
+        function drawDistance() {
+            ctx.fillStyle = 'white';
+            ctx.font = '20px Arial';
+            ctx.fillText(`距离: ${Math.floor(distance)}米`, 10, 30);
+            ctx.fillText(`关卡: ${level}`, canvas.width - 100, 30);
+        }
+
+        function drawCongratulations() {
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.fillStyle = 'white';
+            ctx.font = '30px Arial';
+            ctx.fillText('恭喜通关第一关！', canvas.width / 2 - 100, canvas.height / 2);
+            ctx.font = '20px Arial';
+            ctx.fillText('点击"进入下一关"按钮继续', canvas.width / 2 - 110, canvas.height / 2 + 40);
+        }
+
+        function createBackgroundMusic() {
+            audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            const tempo = 120; // BPM
+            const beatDuration = 60 / tempo;
+
+            const notes = [
+                { note: 'C4', duration: 1 },
+                { note: 'E4', duration: 1 },
+                { note: 'G4', duration: 1 },
+                { note: 'C5', duration: 1 },
+                { note: 'A4', duration: 2 },
+                { note: 'G4', duration: 1 },
+                { note: 'F4', duration: 1 },
+                { note: 'E4', duration: 2 },
+                { note: 'D4', duration: 1 },
+                { note: 'F4', duration: 1 },
+            ];
+
+            const frequencies = {
+                'C4': 261.63, 'D4': 293.66, 'E4': 329.63, 'F4': 349.23,
+                'G4': 392.00, 'A4': 440.00, 'B4': 493.88, 'C5': 523.25
+            };
+
+            let time = audioContext.currentTime;
+
+            function playNote(note, duration) {
+                const oscillator = audioContext.createOscillator();
+                const gainNode = audioContext.createGain();
+
+                oscillator.type = 'sine';
+                oscillator.frequency.setValueAtTime(frequencies[note], time);
+
+                gainNode.gain.setValueAtTime(0.1, time);
+                gainNode.gain.linearRampToValueAtTime(0.1, time + duration * beatDuration - 0.05);
+                gainNode.gain.linearRampToValueAtTime(0, time + duration * beatDuration);
+
+                oscillator.connect(gainNode);
+                gainNode.connect(audioContext.destination);
+
+                oscillator.start(time);
+                oscillator.stop(time + duration * beatDuration);
+
+                time += duration * beatDuration;
+            }
+
+            function playLoop() {
+                notes.forEach(noteInfo => {
+                    playNote(noteInfo.note, noteInfo.duration);
+                });
+
+                setTimeout(playLoop, time - audioContext.currentTime);
+            }
+
+            playLoop();
+        }
+
+        function startBackgroundMusic() {
+            if (!backgroundMusic) {
+                createBackgroundMusic();
+            }
+        }
+
+        function stopBackgroundMusic() {
+            if (audioContext) {
+                audioContext.close();
+                audioContext = null;
+                backgroundMusic = null;
+            }
+        }
+
+        function gameLoop(currentTime) {
+            if (gameState === 'playing') {
+                const deltaTime = (currentTime - lastTime) / 1000; // 转换为秒
+                lastTime = currentTime;
+
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+                drawRoad();
+                createObstacle(deltaTime);
+                moveObstacles(deltaTime);
+                drawCar();
+                drawObstacles();
+                drawDistance();
+
+                roadOffset += carSpeed * deltaTime;
+
+                if (checkCollision()) {
+                    gameState = 'gameOver';
+                    stopBackgroundMusic();
+                    restartButton.style.display = 'inline';
+                } else {
+                    distance += carSpeed * deltaTime;
+                    if (level === 1 && distance >= 2000) {
+                        gameState = 'levelComplete';
+                        stopBackgroundMusic();
+                        nextLevelButton.style.display = 'inline';
+                    }
+                }
+
+                requestAnimationFrame(gameLoop);
+            } else if (gameState === 'gameOver') {
+                ctx.fillStyle = 'white';
+                ctx.font = '30px Arial';
+                ctx.fillText('游戏结束', canvas.width / 2 - 60, canvas.height / 2);
+                ctx.fillText(`最终距离: ${Math.floor(distance)}米`, canvas.width / 2 - 80, canvas.height / 2 + 40);
+            } else if (gameState === 'levelComplete') {
+                drawCongratulations();
+            }
+        }
+
+        function moveCar(direction) {
+            if (gameState === 'playing') {
+                if (direction === 'left' && car.x > 0) {
+                    car.x -= 10;
+                } else if (direction === 'right' && car.x < canvas.width - car.width) {
+                    car.x += 10;
+                }
+            }
+        }
+
+        document.addEventListener('keydown', (e) => {
+            if (gameState === 'playing') {
+                switch(e.key) {
+                    case 'ArrowLeft':
+                        moveCar('left');
+                        break;
+                    case 'ArrowRight':
+                        moveCar('right');
+                        break;
+                }
+            }
+        });
+
+        leftArrow.addEventListener('click', () => moveCar('left'));
+        rightArrow.addEventListener('click', () => moveCar('right'));
+
+        startButton.addEventListener('click', () => {
+            gameState = 'playing';
+            level = 1;
+            initGame();
+            lastTime = performance.now();
+            startButton.style.display = 'none';
+            restartButton.style.display = 'none';
+            nextLevelButton.style.display = 'none';
+            requestAnimationFrame(gameLoop);
+        });
+
+        restartButton.addEventListener('click', () => {
+            gameState = 'playing';
+            level = 1;
+            initGame();
+            lastTime = performance.now();
+            restartButton.style.display = 'none';
+            nextLevelButton.style.display = 'none';
+            requestAnimationFrame(gameLoop);
+        });
+
+        nextLevelButton.addEventListener('click', () => {
+            gameState = 'playing';
+            level = 2;
+            initGame();
+            lastTime = performance.now();
+            nextLevelButton.style.display = 'none';
+            requestAnimationFrame(gameLoop);
+        });
+
+        function showMenu() {
+            ctx.fillStyle = '#333';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.fillStyle = 'white';
+            ctx.font = '30px Arial';
+            ctx.fillText('僵尸赛车小游戏', canvas.width / 2 - 90, canvas.height / 2);
+            ctx.font = '20px Arial';
+            ctx.fillText('点击"开始游戏"按钮开始', canvas.width / 2 - 100, canvas.height / 2 + 40);
+        }
+
+        showMenu();
+    </script>
+</body>
